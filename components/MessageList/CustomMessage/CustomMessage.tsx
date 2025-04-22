@@ -2,15 +2,57 @@ import {
   ReactionSelector,
   ReactionsList,
   useMessageContext,
+  useChannelStateContext
 } from 'stream-chat-react';
 import Image from 'next/image';
 import { useState } from 'react';
 import MessageOptions from './MessageOptions';
+import { PencilIcon } from '@heroicons/react/24/outline';
 
 export default function CustomMessage(): JSX.Element {
   const { message } = useMessageContext();
+  const { channel } = useChannelStateContext();
   const [showOptions, setShowOptions] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState(message.text || '');
+
+  const handleEdit = () => {
+    setIsEditing(true);
+    setEditText(message.text || '');
+    setShowOptions(false);
+  };
+
+  const handleSaveEdit = async () => {
+    if (editText.trim() === message.text) {
+      setIsEditing(false);
+      return;
+    }
+
+    try {
+      if (!channel) return;
+
+      await channel.update(
+        { message: { id: message.id, text: editText } },
+        { text: editText }
+      );
+      
+      setIsEditing(false);
+    } catch (error) {
+      console.error('Error updating message:', error);
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSaveEdit();
+    }
+    if (e.key === 'Escape') {
+      setIsEditing(false);
+      setEditText(message.text || '');
+    }
+  };
 
   const renderAttachment = (attachment: any) => {
     if (attachment.type === 'file') {
@@ -46,6 +88,13 @@ export default function CustomMessage(): JSX.Element {
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
   };
 
+  const isMessageEdited = () => {
+    if (!message.updated_at || !message.created_at) return false;
+    const updatedAt = new Date(message.updated_at).getTime();
+    const createdAt = new Date(message.created_at).getTime();
+    return updatedAt > createdAt;
+  };
+
   return (
     <div
       onMouseEnter={() => setShowOptions(true)}
@@ -59,9 +108,12 @@ export default function CustomMessage(): JSX.Element {
         src={message.user?.image || 'https://getstream.io/random_png/'}
         alt='User avatar'
       />
-      <div>
-        {showOptions && (
-          <MessageOptions showEmojiReactions={setShowReactions} />
+      <div className="flex-1">
+        {showOptions && !isEditing && (
+          <MessageOptions 
+            showEmojiReactions={setShowReactions}
+            onEdit={handleEdit}
+          />
         )}
         {showReactions && (
           <div className='absolute'>
@@ -75,10 +127,40 @@ export default function CustomMessage(): JSX.Element {
           {message.updated_at && (
             <span className='text-xs text-gray-600'>
               {formatDate(message.updated_at)}
+              {isMessageEdited() && ' (edited)'}
             </span>
           )}
         </div>
-        <p className='text-sm text-gray-700'>{message.text}</p>
+        {isEditing ? (
+          <div className="flex items-end space-x-2">
+            <textarea
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              onKeyDown={handleKeyPress}
+              className="flex-1 p-2 text-sm text-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[60px] mt-1"
+              autoFocus
+            />
+            <div className="flex space-x-2 mb-2">
+              <button
+                onClick={() => {
+                  setIsEditing(false);
+                  setEditText(message.text || '');
+                }}
+                className="px-2 py-1 text-sm text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                className="px-2 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className='text-sm text-gray-700'>{message.text}</p>
+        )}
         {message.attachments?.map((attachment) => renderAttachment(attachment))}
         <ReactionsList />
       </div>
@@ -87,11 +169,14 @@ export default function CustomMessage(): JSX.Element {
 
   function formatDate(date: Date | string): string {
     if (typeof date === 'string') {
-      return date;
+      return new Date(date).toLocaleString('en-US', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      });
     }
-    return `${date.toLocaleString('en-US', {
+    return date.toLocaleString('en-US', {
       dateStyle: 'medium',
       timeStyle: 'short',
-    })}`;
+    });
   }
 }
